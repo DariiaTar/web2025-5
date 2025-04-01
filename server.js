@@ -45,7 +45,7 @@ async function handleGetRequest(filePath, res) {
 
     try {
         const stat = await fs.stat(filePath);
-        if (stat.isDirectory()) { // Якщо це папка — помилка
+        if (stat.isDirectory()) { 
             console.error('Error: Tried to read a directory instead of a file');
             res.writeHead(400, { 'Content-Type': 'text/plain' });
             res.end('Bad Request: Expected a file, but found a directory');
@@ -66,6 +66,53 @@ async function handleGetRequest(filePath, res) {
     }
 }
 
+async function handlePutRequest(req, filePath, res) {
+    const chunks = [];
+    console.log("putf");
+    req.on('data', (chunk) => {
+        chunks.push(chunk);
+    });
+
+    req.on('end', async () => {
+        try {
+            const fileData = Buffer.concat(chunks);
+            await fs.mkdir(path.dirname(filePath), { recursive: true });
+            
+            await fs.writeFile(filePath, fileData);
+            
+            console.log(`Файл успішно збережено: ${filePath}`);
+            res.writeHead(201, { 'Content-Type': 'text/plain' });
+            res.end('Файл створено');
+        } catch (err) {
+            console.error(`Помилка при збереженні файлу: ${err}`);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Помилка сервера');
+        }
+    });
+
+    req.on('error', (err) => {
+        console.error(`Помилка при отриманні даних: ${err}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain' });
+        res.end('Помилка сервера');
+    });
+}
+
+
+
+async function handleDeleteRequest(filePath, res) {
+    try {
+        await fs.unlink(filePath);
+        res.writeHead(200);
+        res.end();
+    } catch (err) {
+        if (err.code === 'ENOENT') {
+            res.writeHead(404);
+        } else {
+            res.writeHead(500);
+        }
+        res.end();
+    }
+}
 
 async function startServer() {
     try {
