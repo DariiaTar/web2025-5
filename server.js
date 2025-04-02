@@ -2,6 +2,7 @@ const { program } = require('commander');
 const http = require('http');
 const fs = require('fs').promises;
 const path = require('path');
+const superagent = require('superagent'); 
 
 program
     .requiredOption('-h, --host <host>', 'Host address')
@@ -28,11 +29,11 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    const filePath = path.join(cacheDir, `${code}.jpg`); 
+    const filePath = path.join(cacheDir, `${code}.jpg`);
     console.log(`${method} request for file: ${filePath}`);
 
     if (method === 'GET') {
-        handleGetRequest(filePath, res);
+        handleGetRequest(filePath, code, res);
     } else if (method === 'PUT') {
         handlePutRequest(req, filePath, res);
     } else if (method === 'DELETE') {
@@ -40,12 +41,12 @@ const server = http.createServer((req, res) => {
     }
 });
 
-async function handleGetRequest(filePath, res) {
+async function handleGetRequest(filePath, code, res) {
     console.log(`GET request for file: ${filePath}`);
 
     try {
         const stat = await fs.stat(filePath);
-        if (stat.isDirectory()) { 
+        if (stat.isDirectory()) {
             console.error('Error: Tried to read a directory instead of a file');
             res.writeHead(400, { 'Content-Type': 'text/plain' });
             res.end('Bad Request: Expected a file, but found a directory');
@@ -55,49 +56,63 @@ async function handleGetRequest(filePath, res) {
         const data = await fs.readFile(filePath);
         res.writeHead(200, { 'Content-Type': 'image/jpeg' });
         res.end(data);
+
     } catch (err) {
-        console.error(`Error reading file: ${err.message}`);
         if (err.code === 'ENOENT') {
-            res.writeHead(404);
+            console.log(`File not found in cache. Fetching from http.cat...`);
+            fetchFromHttpCat(code, filePath, res);
         } else {
+            console.error(`Error reading file: ${err.message}`);
             res.writeHead(500);
+            res.end();
         }
-        res.end();
+    }
+}
+
+async function fetchFromHttpCat(code, filePath, res) {
+    try {
+        const response = await superagent.get(`https://http.cat/${code}`);
+        
+        if (response.status === 200) {
+            const data = response.body; 
+            await fs.writeFile(filePath, data); 
+            console.log(`Image for HTTP code ${code} saved to cache.`);
+            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            res.end(data);
+        } else {
+            res.writeHead(404);
+            res.end('Not Found');
+        }
+    } catch (err) {
+        console.error(`Error fetching image from http.cat: ${err.message}`);
+        res.writeHead(404);
+        res.end('Not Found');
     }
 }
 
 async function handlePutRequest(req, filePath, res) {
     const chunks = [];
-    console.log("putf");
-    req.on('data', (chunk) => {
-        chunks.push(chunk);
-    });
+    req.on('data', (chunk) => chunks.push(chunk));
 
     req.on('end', async () => {
         try {
-            const fileData = Buffer.concat(chunks);
-            await fs.mkdir(path.dirname(filePath), { recursive: true });
-            
-            await fs.writeFile(filePath, fileData);
-            
-            console.log(`Файл успішно збережено: ${filePath}`);
+            const data = Buffer.concat(chunks);
+            await fs.writeFile(filePath, data);
+            console.log(`File saved: ${filePath}`);
             res.writeHead(201, { 'Content-Type': 'text/plain' });
-            res.end('Файл створено');
+            res.end('Created');
         } catch (err) {
-            console.error(`Помилка при збереженні файлу: ${err}`);
-            res.writeHead(500, { 'Content-Type': 'text/plain' });
-            res.end('Помилка сервера');
+            console.error(`Error writing file: ${err.message}`);
+            res.writeHead(500);
+            res.end();
         }
     });
 
-    req.on('error', (err) => {
-        console.error(`Помилка при отриманні даних: ${err}`);
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end('Помилка сервера');
+    req.on('error', () => {
+        res.writeHead(500);
+        res.end();
     });
 }
-
-
 
 async function handleDeleteRequest(filePath, res) {
     try {
